@@ -2,7 +2,7 @@
 # node-unifi
 
 [![Build](https://github.com/jens-maus/node-unifi/workflows/CI/badge.svg)](https://github.com/jens-maus/node-unifi/actions)
-[![NPM version](http://img.shields.io/npm/v/node-unifi.svg)](https://www.npmjs.com/package/node-unifi)
+[![NPM version](https://img.shields.io/npm/v/node-unifi.svg?logo=npm)](https://www.npmjs.com/package/node-unifi)
 [![Downloads](https://img.shields.io/npm/dm/node-unifi.svg)](https://www.npmjs.com/package/node-unifi)
 [![License](https://img.shields.io/github/license/jens-maus/node-unifi.svg)](https://github.com/jens-maus/node-unifi/blob/master/LICENSE)
 [![Donate](https://img.shields.io/badge/Donate-PayPal-green.svg)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=RAQSDY9YNZVCL)
@@ -10,10 +10,10 @@
 
 [![NPM](https://nodei.co/npm/node-unifi.png?downloads=true)](https://nodei.co/npm/node-unifi/)
 
-Node-UniFi is a NodeJS module that allows to query/control [UniFi devices](http://www.ubnt.com/) via the official UniFi-Controller API. It is developed to be compatible to the UniFi-Controller API version starting with v4.x.x up to v6.x.x
+Node-UniFi is a NodeJS module that allows to query/control [UniFi devices](http://www.ubnt.com/) via the official UniFi-Controller API. It is developed to be compatible to the UniFi-Controller API version starting with v4.x.x up to v7.x.x
 
 ## Features
-* Support all UniFi-Controller API features introduced with v4.x.x, v5.x.x or v6.x.x.
+* Support all UniFi-Controller API features introduced with v4.x.x, v5.x.x, v6.x.x, v7.x.x.
 * Support CloudKey Gen1, CloudKey Gen2, UnifiOS-based UDM-Pro Controller as well as self-hostd UniFi controller software.
 * Returns all data in well-defined JSON parsable strings/objects.
 * Use of modern [axios](https://github.com/axios/axios)-based nodejs http library.
@@ -21,7 +21,7 @@ Node-UniFi is a NodeJS module that allows to query/control [UniFi devices](http:
 * Support for WebSocket-based push notifications of UniFi controllers for listening for state/object changes using [EventEmitter](https://github.com/EventEmitter2/EventEmitter2)-based nodejs functionality.
 
 ## Requirements
-* Installed [UniFi-Controller](https://www.ubnt.com/download/unifi) version v4, v5 or v6, CloudKey Gen1, Gen2 or UDM-Pro.
+* Installed [UniFi-Controller](https://www.ubnt.com/download/unifi) version v4, v5, v6, or v7 CloudKey Gen1, Gen2 or UDM-Pro.
 * Direct network connectivity between the application using node-unifi and the host:port (normally TCP port 8443 or 443) where the UniFi controller is running on.
 * Use of **local accounts** for authentication; not UniFi Cloud accounts nor 2FA.
 * Node.js version >= 12.x
@@ -140,6 +140,7 @@ v2 version, all you have to do is:
 * make sure your application can deal with NodeJS [Promises](https://nodejs.dev/learn/understanding-javascript-promises) as all node-unifi API functions return proper Promises allowing to use `.then()`/`.catch()` statements for synchronous processing of events (see Examples) rather than expecting callback functions, forcing you to nest them properly.
 * eliminate the previously necessary `site` function argument required when calling a node-unifi function. Now you can either use the `{ site: 'my site' }` argument when passing contructor options to node-unifi or you switch to a different site using `controller.opts.site='my site'` before calling a node-unifi API function.
 * as the API functions had been changed to work on a single site only, make sure your app is changed so that it expects a single site JSON return dataset only.
+* The new version by default verifies SSL connections and certificates. To restore the behaviour of the old version set "sslverify: false" in the constructor options
 
 ## References
 This nodejs package/class uses functionality/Know-How gathered from different third-party projects:
@@ -156,7 +157,7 @@ The following projects are known to use this nodejs class for query/control UniF
 ## License
 The MIT License (MIT)
 
-Copyright (c) 2017-2021 Jens Maus &lt;mail@jens-maus.de&gt;
+Copyright (c) 2017-2022 Jens Maus &lt;mail@jens-maus.de&gt;
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

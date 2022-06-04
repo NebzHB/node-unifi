@@ -16,9 +16,9 @@
  * The majority of the functions in here are actually based on the PHP UniFi-API-client class
  * which defines compatibility to UniFi-Controller versions v4 and v5+
  *
- * Based/Compatible to UniFi-API-client class: v1.1.70
+ * Based/Compatible to UniFi-API-client class: v1.1.79
  *
- * Copyright (c) 2017-2021 Jens Maus <mail@jens-maus.de>
+ * Copyright (c) 2017-2022 Jens Maus <mail@jens-maus.de>
  *
  * The source code is distributed under the MIT license
  *
@@ -26,12 +26,10 @@
 'use strict';
 
 const EventEmitter = require('eventemitter2').EventEmitter2;
-const https = require('https');
 const WebSocket = require('ws');
 const axios = require('axios');
-const axiosCookieJarSupport = require('axios-cookiejar-support').default;
-const tough = require('tough-cookie');
-axiosCookieJarSupport(axios);
+const {CookieJar} = require('tough-cookie');
+const {HttpCookieAgent, HttpsCookieAgent} = require('http-cookie-agent');
 
 /// ///////////////////////////////////////////////////////////
 // PUBLIC CLASS
@@ -53,10 +51,11 @@ class Controller extends EventEmitter {
     this.opts.sslverify = (typeof (this.opts.sslverify) === 'undefined' ? true : this.opts.sslverify);
 
     this._baseurl = new URL(`https://${options.host}:${options.port}`);
-    this._cookieJar = new tough.CookieJar();
+    this._cookieJar = new CookieJar();
     this._unifios = false;
     this._isClosed = true;
     this._autoReconnectInterval = 5 * 1000; // Ms
+    this._pingPongInterval = 3 * 1000; // Ms
     this._isInit = false;
   }
 
@@ -67,7 +66,7 @@ class Controller extends EventEmitter {
    *
    * returns true upon success
    */
-  login(username = null, password = null, reconnect = false) {
+  login(username = null, password = null) {
     return new Promise((resolve, reject) => {
       // Allows to override username+password
       if (username !== null) {
@@ -96,10 +95,8 @@ class Controller extends EventEmitter {
             password: this.opts.password
           }).then(() => {
             resolve(true);
-          }).catch(() => {
-            if (!reconnect) {
-              this._reconnect();
-            }
+          }).catch(error => {
+            reject(error);
           });
         }
       }).catch(error => {
@@ -1050,12 +1047,12 @@ class Controller extends EventEmitter {
   /**
    * Assign client device to another group - set_usergroup()
    *
-   * required parameter <user_id>  = id of the user device to be modified
-   * required parameter <group_id> = id of the user group to assign user to
-   *
+   * @param string $client_id  _id value of the client device to be modified
+   * @param string $group_id   _id value of the user group to assign client device to
+   * @return bool returns true upon success
    */
-  setUserGroup(user_id, group_id) {
-    return this._request('/api/s/<SITE>/upd/user/' + user_id.trim(), {usergroup_id: group_id});
+  setUserGroup(client_id, group_id) {
+    return this._request('/api/s/<SITE>/upd/user/' + client_id.trim(), {usergroup_id: group_id});
   }
 
   /**
@@ -1081,6 +1078,20 @@ class Controller extends EventEmitter {
         payload.fixed_ip = fixed_ip;
       }
     }
+
+    return this._request('/api/s/<SITE>/rest/user/' + client_id.trim(), payload, 'PUT');
+  }
+
+  /**
+   * Update client name (using REST) - edit_client_name()
+   *
+   * @param string $client_id   _id value for the client
+   * @param bool   $name of the client
+   * @return array|false returns an array containing a single object with attributes of the updated client on success
+   */
+  editClientName(client_id, name) {
+    const payload = {_id: client_id,
+      name};
 
     return this._request('/api/s/<SITE>/rest/user/' + client_id.trim(), payload, 'PUT');
   }
@@ -1777,7 +1788,7 @@ class Controller extends EventEmitter {
       x_password};
 
     if (note !== null) {
-      payload.note = note;
+      payload.note = note.trim();
     }
 
     return this._request('/api/s/<SITE>/rest/hotspotop', payload);
@@ -1815,7 +1826,7 @@ class Controller extends EventEmitter {
       quota};
 
     if (note !== null) {
-      payload.note = note;
+      payload.note = note.trim();
     }
 
     if (up !== null) {
@@ -2010,15 +2021,40 @@ class Controller extends EventEmitter {
   }
 
   /**
+   * Adopt a device using custom SSH credentials - advanced_adopt_device()
+   *
+   * @param string $mac            device MAC address
+   * @param string $ip             IP to use for SSH connection
+   * @param string $username       SSH username
+   * @param string $password       SSH password
+   * @param string $url            inform URL to point the device to
+   * @param int    $port           optional, SSH port
+   * @param bool   $ssh_key_verify optional, whether to verify device SSH key
+   * @return bool true on success
+   */
+  advancedAdoptDevice(mac, ip, username, password, url, port = 22, ssh_key_verify = true) {
+    const payload = {cmd: 'adv-adopt',
+      mac: mac.toLowerCase(),
+      ip,
+      username,
+      password,
+      url,
+      port,
+      sshKeyVerify: ssh_key_verify};
+
+    return this._request('/api/s/<SITE>/cmd/devmgr', payload);
+  }
+
+  /**
    * Reboot a device - restart_device()
    *
-   * return true on success
-   * required parameter <mac>  = device MAC address
-   * optional parameter <reboot_type> = string; two options: 'soft' or 'hard', defaults to soft
-   *                                    soft can be used for all devices, requests a plain restart of that   device
-   *                                    hard is special for PoE switches and besides the restart also requ  ests a
-   *                                    power cycle on all PoE capable ports. Keep in mind that a 'hard' r  eboot
-   *                                    does *NOT* trigger a factory-reset.
+   * @param string $mac         device MAC address
+   * @param string $reboot_type optional, two options: 'soft' or 'hard', defaults to soft
+   *                            soft can be used for all devices, requests a plain restart of that device
+   *                            hard is special for PoE switches and besides the restart also requests a
+   *                            power cycle on all PoE capable ports. Keep in mind that a 'hard' reboot
+   *                            does *NOT* trigger a factory-reset.
+   * @return bool true on success
    */
   restartDevice(mac, reboot_type = 'soft') {
     const payload = {cmd: 'restart',
@@ -2717,50 +2753,57 @@ class Controller extends EventEmitter {
   /**
    * Create a Radius user account (using REST) - create_radius_account()
    *
-   * returns an array containing a single object for the newly created account upon success, else returns false
-   * required parameter <name>               = string; name for the new account
-   * required parameter <x_password>         = string; password for the new account
-   * required parameter <tunnel_type>        = integer; must be one of the following values:
-   *                                              1      Point-to-Point Tunneling Protocol (PPTP)
-   *                                              2      Layer Two Forwarding (L2F)
-   *                                              3      Layer Two Tunneling Protocol (L2TP)
-   *                                              4      Ascend Tunnel Management Protocol (ATMP)
-   *                                              5      Virtual Tunneling Protocol (VTP)
-   *                                              6      IP Authentication Header in the Tunnel-mode (AH)
-   *                                              7      IP-in-IP Encapsulation (IP-IP)
-   *                                              8      Minimal IP-in-IP Encapsulation (MIN-IP-IP)
-   *                                              9      IP Encapsulating Security Payload in the Tunnel-mode (ESP)
-   *                                              10     Generic Route Encapsulation (GRE)
-   *                                              11     Bay Dial Virtual Services (DVS)
-   *                                              12     IP-in-IP Tunneling
-   *                                              13     Virtual LANs (VLAN)
-   * required parameter <tunnel_medium_type> = integer; must be one of the following values:
-   *                                              1      IPv4 (IP version 4)
-   *                                              2      IPv6 (IP version 6)
-   *                                              3      NSAP
-   *                                              4      HDLC (8-bit multidrop)
-   *                                              5      BBN 1822
-   *                                              6      802 (includes all 802 media plus Ethernet "canonical format")
-   *                                              7      E.163 (POTS)
-   *                                              8      E.164 (SMDS, Frame Relay, ATM)
-   *                                              9      F.69 (Telex)
-   *                                              10     X.121 (X.25, Frame Relay)
-   *                                              11     IPX
-   *                                              12     Appletalk
-   *                                              13     Decnet IV
-   *                                              14     Banyan Vines
-   *                                              15     E.164 with NSAP format subaddress
-   * optional parameter <vlan>               = integer; VLAN to assign to the account
-   *
    * NOTES:
    * - this function/method is only supported on controller versions 5.5.19 and later
+   *
+   * @param  string $name               name for the new account
+   * @param  string $x_password         password for the new account
+   * @param  int    $tunnel_type        optional, must be one of the following values:
+   *                                    1      Point-to-Point Tunneling Protocol (PPTP)
+   *                                    2      Layer Two Forwarding (L2F)
+   *                                    3      Layer Two Tunneling Protocol (L2TP)
+   *                                    4      Ascend Tunnel Management Protocol (ATMP)
+   *                                    5      Virtual Tunneling Protocol (VTP)
+   *                                    6      IP Authentication Header in the Tunnel-mode (AH)
+   *                                    7      IP-in-IP Encapsulation (IP-IP)
+   *                                    8      Minimal IP-in-IP Encapsulation (MIN-IP-IP)
+   *                                    9      IP Encapsulating Security Payload in the Tunnel-mode (ESP)
+   *                                    10     Generic Route Encapsulation (GRE)
+   *                                    11     Bay Dial Virtual Services (DVS)
+   *                                    12     IP-in-IP Tunneling
+   *                                    13     Virtual LANs (VLAN)
+   * @param  int    $tunnel_medium_type optional, must be one of the following values:
+   *                                    1      IPv4 (IP version 4)
+   *                                    2      IPv6 (IP version 6)
+   *                                    3      NSAP
+   *                                    4      HDLC (8-bit multidrop)
+   *                                    5      BBN 1822
+   *                                    6      802 (includes all 802 media plus Ethernet "canonical format")
+   *                                    7      E.163 (POTS)
+   *                                    8      E.164 (SMDS, Frame Relay, ATM)
+   *                                    9      F.69 (Telex)
+   *                                    10     X.121 (X.25, Frame Relay)
+   *                                    11     IPX
+   *                                    12     Appletalk
+   *                                    13     Decnet IV
+   *                                    14     Banyan Vines
+   *                                    15     E.164 with NSAP format subaddress
+   * @param  int    $vlan               optional, VLAN to assign to the account
+   * @return array                      containing a single object for the newly created account upon success, else returns false
+   * @return bool|array                 containing a single object for the newly created account upon success, else returns false
    */
-  createRadiusAccount(name, x_password, tunnel_type, tunnel_medium_type, vlan = null) {
+  createRadiusAccount(name, x_password, tunnel_type = null, tunnel_medium_type = null, vlan = null) {
     const payload = {name,
-      x_password,
-      tunnel_type,
-      tunnel_medium_type
+      x_password
     };
+
+    if (tunnel_type !== null) {
+      payload.tunnel_type = tunnel_type;
+    }
+
+    if (tunnel_medium_type !== null) {
+      payload.tunnel_medium_type = tunnel_medium_type;
+    }
 
     if (vlan !== null) {
       payload.vlan = vlan;
@@ -2868,14 +2911,14 @@ class Controller extends EventEmitter {
    * Only use this method when you fully understand the behavior of the UniFi controller API. No input validation is performed, to be used with care!
    *
    * @param  string       $path           suffix of the URL (following the port number) to pass request to, *must* start with a "/" character
-   * @param  string       $request_method optional, HTTP request type, can be GET (default), POST, PUT, PATCH, or DELETE
+   * @param  string       $method         optional, HTTP request type, can be GET (default), POST, PUT, PATCH, or DELETE
    * @param  object|array $payload        optional, stdClass object or associative array containing the payload to pass
    * @param  string       $return         optional, string; determines how to return results, when "boolean" the method must return a
    *                                      boolean result (true/false) or "array" when the method must return an array
    * @return bool|array                   returns results as requested, returns false on incorrect parameters
    */
-  customApiRequest(path, request_method = null, payload = null) {
-    return this._request(path, payload, request_method);
+  customApiRequest(path, method = null, payload = null) {
+    return this._request(path, payload, method);
   }
 
   /**
@@ -2900,21 +2943,22 @@ class Controller extends EventEmitter {
 
         const pingpong = setInterval(() => {
           this._ws.send('ping');
-        }, 15000);
+        }, this._pingPongInterval);
 
         this._ws.on('open', () => {
           this._isReconnecting = false;
           this.emit('ctrl.connect');
         });
 
-        this._ws.on('message', data => {
-          if (data === 'pong') {
+        this._ws.on('message', (data, isBinary) => {
+          const message = isBinary ? data : data.toString();
+          if (message === 'pong') {
             this.emit('ctrl.pong');
             return;
           }
 
           try {
-            const parsed = JSON.parse(data);
+            const parsed = JSON.parse(message);
             if ('meta' in parsed && Array.isArray(parsed.data)) {
               for (const entry of parsed.data) {
                 this._event(parsed.meta, entry);
@@ -2955,14 +2999,13 @@ class Controller extends EventEmitter {
         resolve(2);
       } else {
         this._instance = axios.create({
-          jar: this._cookieJar,
-          withCredentials: true,
-          httpsAgent: new https.Agent({rejectUnauthorized: this.opts.sslverify, requestCert: true, keepAlive: true})
+          httpAgent: new HttpCookieAgent({jar: this._cookieJar}),
+          httpsAgent: new HttpsCookieAgent({jar: this._cookieJar, rejectUnauthorized: this.opts.sslverify, requestCert: true})
         });
         this._instance.get(this._baseurl.toString()).then(response => {
           if (response.headers['x-csrf-token']) {
             this._xcsrftoken = response.headers['x-csrf-token'];
-            this._instance.defaults.headers.common['X-CSRF-Token'] = this._xcsrftoken;
+            this._instance.defaults.headers.common['x-csrf-token'] = this._xcsrftoken;
             this._unifios = true;
           } else {
             this._unifios = false;
@@ -2999,10 +3042,10 @@ class Controller extends EventEmitter {
     });
   }
 
-  _connect(reconnect = false) {
+  _connect() {
     return new Promise((resolve, reject) => {
       this._isClosed = false;
-      this.login(null, null, reconnect).then(() => {
+      this.login(null, null).then(() => {
         resolve(true);
       }).catch(error => {
         reject(error);
@@ -3011,12 +3054,12 @@ class Controller extends EventEmitter {
   }
 
   _reconnect() {
-    if (!this._isReconnecting && !this._isClosed) {
+    if (this._isReconnecting === false && this._isClosed === false) {
       this._isReconnecting = true;
       setTimeout(() => {
         this.emit('ctrl.reconnect');
         this._isReconnecting = false;
-        this._connect(true).catch(() => {
+        this.listen().catch(() => {
           console.dir('_reconnect() encountered an error');
         });
       }, this._autoReconnectInterval);
@@ -3043,6 +3086,11 @@ class Controller extends EventEmitter {
           data: payload
         }).then(response => {
           const body = response.data;
+          if (response.headers['x-csrf-token']) {
+            this._xcsrftoken = response.headers['x-csrf-token'];
+            this._instance.defaults.headers.common['x-csrf-token'] = this._xcsrftoken;
+          }
+
           if (body !== null && typeof (body) !== 'undefined') {
             if (typeof (body.meta) !== 'undefined') {
               if (response.status >= 200 && response.status < 400 && body.meta.rc === 'ok') {

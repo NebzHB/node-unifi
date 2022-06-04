@@ -1,6 +1,6 @@
 {
   "name": "node-unifi",
-  "version": "2.0.1",
+  "version": "2.0.5",
   "description": "NodeJS class for querying UniFi-Controller (www.ubnt.com)",
   "author": "Jens Maus <mail@jens-maus.de>",
   "homepage": "https://github.com/jens-maus/node-unifi",
@@ -17,24 +17,23 @@
     "url": "git+https://github.com/jens-maus/node-unifi.git"
   },
   "dependencies": {
-    "axios": "^0.21.1",
-    "axios-cookiejar-support": "^1.0.1",
-    "eventemitter2": "^6.4.4",
-    "https": "^1.0.0",
+    "axios": "^0.27.2",
+    "eventemitter2": "^6.4.5",
+    "http-cookie-agent": "^1.0.5",
     "tough-cookie": "^4.0.0",
     "url": "^0.11.0",
-    "ws": "^7.5.0"
+    "ws": "^8.7.0"
   },
   "devDependencies": {
-    "eslint": ">=7.29.0",
+    "eslint": ">=7.32.0",
     "pre-commit": "^1.2.2",
     "xo": "~0.39.1",
-    "glob-parent": ">=5.1.2",
+    "glob-parent": ">=6.0.2",
     "should": "latest",
     "mocha": "latest",
     "mocha-clean": "latest",
     "mocha-steps": "latest",
-    "dot-prop": ">=6.0.1"
+    "dot-prop": ">=7.2.0"
   },
   "xo": {
     "space": 2
