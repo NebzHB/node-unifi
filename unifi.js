@@ -47,9 +47,11 @@ class Controller extends EventEmitter {
     this.opts.port = (typeof (this.opts.port) === 'undefined' ? 8443 : this.opts.port);
     this.opts.username = (typeof (this.opts.username) === 'undefined' ? 'admin' : this.opts.username);
     this.opts.password = (typeof (this.opts.password) === 'undefined' ? 'ubnt' : this.opts.password);
+    this.opts.token2FA = (typeof (this.opts.token2FA) === 'undefined' ? null : this.opts.token2FA);
     this.opts.site = (typeof (this.opts.site) === 'undefined' ? 'default' : this.opts.site);
     this.opts.sslverify = (typeof (this.opts.sslverify) === 'undefined' ? true : this.opts.sslverify);
     this.opts.timeout = (typeof (this.opts.timeout) === 'undefined' ? 5000 : this.opts.timeout);
+    this.opts.rememberMe = (typeof (this.opts.rememberMe) === 'undefined' ? true : this.opts.rememberMe);
 
     this._baseurl = new URL(`https://${options.host}:${options.port}`);
     this._cookieJar = new CookieJar();
@@ -67,7 +69,7 @@ class Controller extends EventEmitter {
    *
    * returns true upon success
    */
-  async login(username = null, password = null) {
+  async login(username = null, password = null, token2FA = null) {
     // Allows to override username+password
     if (username !== null) {
       this.opts.username = username;
@@ -75,6 +77,10 @@ class Controller extends EventEmitter {
 
     if (password !== null) {
       this.opts.password = password;
+    }
+
+    if (token2FA !== null) {
+      this.opts.token2FA = token2FA;
     }
 
     // Make sure init() was called
@@ -91,14 +97,25 @@ class Controller extends EventEmitter {
       endpointUrl = `${this._baseurl.href}api/auth/login`;
     }
 
-    // Perform the login to the Unifi controller
-    const response = await this._instance.post(endpointUrl, {
+    // Prepare payload data
+    const data = {
       username: this.opts.username,
-      password: this.opts.password
-    }, {
+      password: this.opts.password,
+      rememberMe: this.opts.rememberMe
+    };
+
+    // Add 2FA token to payload
+    if (this.opts.token2FA) {
+      // On UniFiOS 2FA is in 'token' field, else in 'ubic_2fa_token'
+      data[this._unifios ? 'token' : 'ubic_2fa_token'] = this.opts.token2FA;
+    }
+
+    // Perform the login to the Unifi controller
+    const response = await this._instance.post(endpointUrl, data, {
       timeout: this.opts.timeout
     });
 
+    // Catch x-csrf-token if supplied in response
     if (response.headers['x-csrf-token']) {
       this._xcsrftoken = response.headers['x-csrf-token'];
       this._instance.defaults.headers.common['x-csrf-token'] = this._xcsrftoken;
@@ -1956,6 +1973,18 @@ class Controller extends EventEmitter {
   }
 
   /**
+   * Set port forwarding rule - set_port_forwarding()
+   *
+   * required parameter <rule_id> = id of port forwarding rule retrieved by getPortForwarding
+   * required parameter <enable>  = enable (true) or disable (false) rule
+   *
+   * @return true on success
+   */
+  setPortForwarding(rule_id, enable) {
+    return this._request('/api/s/<SITE>/rest/portforward/' + rule_id.trim(), {enabled: enable}, 'PUT');
+  }
+
+  /**
    * Fetch dynamic DNS settings - list_dynamicdns()
    *
    * @return array  containing dynamic DNS settings
@@ -2931,12 +2960,17 @@ class Controller extends EventEmitter {
   async listen() {
     const cookies = await this._cookieJar.getCookieString(this._baseurl.href);
 
-    let eventsUrl = `wss://${this._baseurl.host}/wss/s/${this.opts.site}/events`;
+    let eventsUrl = new URL(`wss://${this._baseurl.host}/wss/s/${this.opts.site}/events`);
     if (this._unifios) {
-      eventsUrl = `wss://${this._baseurl.host}/proxy/network/wss/s/${this.opts.site}/events`;
+      eventsUrl = new URL(`wss://${this._baseurl.host}/proxy/network/wss/s/${this.opts.site}/events`);
     }
 
-    this._ws = new WebSocket(eventsUrl, {
+    // Make sure we use clients=v2 URL parameter for the
+    // more advanced version of the UniFi Websocket support
+    eventsUrl.searchParams.set('clients', 'v2');
+
+    // Create WebSocket
+    this._ws = new WebSocket(eventsUrl.href, {
       perMessageDeflate: false,
       rejectUnauthorized: this.opts.sslverify,
       headers: {
@@ -3003,15 +3037,25 @@ class Controller extends EventEmitter {
       httpsAgent: new HttpsCookieAgent({cookies: {jar}, rejectUnauthorized: this.opts.sslverify, requestCert: true})
     });
 
+    // Identify if this is UniFiOS or not by calling the baseURL without
+    // any path and then check for the return code, etc.
     const response = await this._instance.get(this._baseurl.toString(), {
-      timeout: this.opts.timeout
+      timeout: this.opts.timeout,
+      maxRedirects: 0,
+      validateStatus: () => true
     });
-    if (response.headers['x-csrf-token']) {
-      this._xcsrftoken = response.headers['x-csrf-token'];
-      this._instance.defaults.headers.common['x-csrf-token'] = this._xcsrftoken;
-      this._unifios = true;
-    } else {
+
+    // Check for UniFiOS
+    if (response.status === 302 && response.headers.location === '/manage') {
       this._unifios = false;
+    } else if (response.status === 200) {
+      this._unifios = true;
+      if (response.headers['x-csrf-token']) {
+        this._xcsrftoken = response.headers['x-csrf-token'];
+        this._instance.defaults.headers.common['x-csrf-token'] = this._xcsrftoken;
+      }
+    } else {
+      throw new Error('failed to detect UniFiOS status');
     }
 
     // DEBUG
@@ -3029,7 +3073,7 @@ class Controller extends EventEmitter {
     this._isInit = true;
     try {
       this._isClosed = false;
-      await this.login(null, null);
+      await this.login(null, null, null);
 
       return 1;
     } catch (error) {
